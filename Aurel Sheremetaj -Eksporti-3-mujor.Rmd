@@ -1,0 +1,400 @@
+---
+title: Eksporti 3 mujor
+author: Aurel Sheremetaj
+date: 2025-12-21
+output:
+  html_document:
+    theme: united
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+---
+
+
+# Hyrje 
+Në këtë detyrë analizohet seria kohore e eksportit 3-mujor të energjisë elektrike, me qëllim identifikimin e karakteristikave kryesore dhe ndërtimin e modeleve të përshtatshme parashikuese. Fillimisht, seria studiohet përmes analizës grafike dhe dekompozimit për të evidentuar praninë e trendit dhe sezonalitetit. Stacionariteti i saj testohet duke përdorur testin Augmented Dickey–Fuller. Më pas, ndërtohen dhe krahasohen disa modele parashikuese, duke përfshirë shehshimin eksponencial të njëfishtë, metodën Holt, Holt–Winters (additiv dhe multiplikativ) dhe modelin ETS.
+
+
+---
+
+# Dataseti
+
+
+```{r setup, include=FALSE}
+library(readxl)
+library(ggplot2)
+library(forecast)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(dygraphs)
+```
+
+
+```{r}
+library(readxl)
+library(knitr)
+
+Eksporti_3_mujor <- read_excel("~/bilaci i energjise elektrike dhe eksporti.xlsx")
+head(Eksporti_3_mujor)
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+Eksporti_3_mujor <- Eksporti_3_mujor %>%
+  separate(Koha, into = c("Viti", "Tremujori"), sep = "-", convert = TRUE)
+
+head(Eksporti_3_mujor)
+
+```
+
+```{r}
+ts_eksporti <- ts(Eksporti_3_mujor$Eksporti,
+                  start = c(min(Eksporti_3_mujor$Viti), 1),
+                  frequency = 4)
+ts_eksporti
+```
+
+## Paraqitja grafike
+
+```{r}
+plot(ts_eksporti,
+     type = "o",                 
+     col = "darkblue",          
+     pch = 16,
+     lwd = 2,
+     main = "Eksporti i energjisë elektrike (3-mujor)",
+     ylab = "Eksporti (në njësi)",
+     xlab = "Koha (Vitet dhe Tremujorët)")
+grid(col = "gray80")
+```
+
+
+```{r}
+ #sezonaliteti trendi 
+decomp <- decompose(ts_eksporti) 
+plot(decomp)
+```
+
+Nga grafiku i mesiperm mund te shohim se  seria jone ka nje trend pjeserisht rrites ne disa pika dhe ka sezonaliet .
+
+```{r}
+ggsubseriesplot(ts_eksporti)
+```
+
+Grafiku i mesiperm tregon një sezonalitet shumë të fortë, ku çdo tremujor paraqet një nivel karakteristik të eksportit. T3 dhe T4 janë tremujorët me eksport më të lartë, ndërsa T1 paraqet vlerat më të ulëta. Ky model sezonal përsëritet në mënyrë të qëndrueshme nga viti në vit, duke treguar se eksportet e energjisë elektrike janë të lidhura fort me faktorët stinorë dhe hidroenergjetikë. Luhatjet brenda secilit tremujor janë të pranishme, por nuk e ndryshojnë natyrën e ciklit sezonal.
+
+
+```{r}
+library(forecast)
+library(ggplot2)
+
+ggsubseriesplot(ts_eksporti, color = "black") +
+  geom_line(aes(group = 1),
+            color = "black",
+            linewidth = 0.7) +
+
+  # vetëm mesatarja e përgjithshme
+  geom_hline(yintercept = mean(ts_eksporti),
+             color = "red",
+             linetype = "dashed",
+             linewidth = 1) +
+
+  theme_minimal(base_size = 15) +
+  labs(
+    title = "Subseries Plot për Eksportin 3-Mujor",
+    subtitle = "Vizualizimi i sezonalitetit brenda secilit tremujor",
+    x = "Tremujori",
+    y = "Eksporti"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 20),
+    plot.subtitle = element_text(size = 14),
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+```
+```{r}
+dygraph(ts_eksporti,
+        main = "Eksporti i Energjisë Elektrike (3-mujor)") %>%
+  dySeries("V1",
+           label = "Eksporti",
+           color = "#1f77b4",
+           fillGraph = TRUE,
+           strokeWidth = 2) %>%
+  dyRangeSelector(height = 25)
+
+```
+
+## Stacionariteti
+
+```{r}
+library(tseries)
+adf.test(ts_eksporti)
+```
+
+Nga analiza e mesiperme shohim se seria  eshte stacionare pasi dhe nga vlera p=0.01 eshte me e vogel se intervali i besimii 5%.
+
+---
+
+# Sheshimi eksponencial
+
+## Ndarja e të dhënave në Train/Test
+
+
+```{r}
+h_test <- 8   # 8 tremujorë = 2 vite të fundit
+n <- length(ts_eksporti)
+cut_point <- time(ts_eksporti)[n - h_test]
+ts_train <- window(ts_eksporti, end = cut_point)
+ts_test <- window(ts_eksporti, start = cut_point + deltat(ts_eksporti))
+ts_train
+```
+```{r}
+ts_test
+```
+```{r}
+fit_ses <- ses(ts_train,
+               h = h_test,
+               initial = "optimal")
+
+fit_ses
+```
+```{r}
+autoplot(ts_train, series = "Trajnimi", color = "black") +
+  autolayer(fitted(fit_ses),
+            series = "Përshtatja (SES)",
+            color = "darkblue") +
+  autolayer(ts_test,
+            series = "Vlerat reale (Test)",
+            color = "darkgreen") +
+  autolayer(fit_ses$mean,
+            series = "Parashikimi (SES)",
+            color = "brown") +
+  labs(
+    title = "Modeli SES – Përshtatja dhe Parashikimi i Eksportit",
+    subtitle = "Krahasimi me të dhënat reale",
+    x = "Koha",
+    y = "Eksporti"
+  ) +
+  guides(colour = guide_legend(title = "Seria")) +
+  theme_minimal(base_size = 14)
+
+
+
+# Tabela e saktësisë
+acc_ses <- accuracy(fit_ses, ts_test)
+acc_ses
+
+# Kontrolli i mbetjeve
+checkresiduals(fit_ses)
+```
+
+Nga te dhenat e mesiperme shohim se gjatë trajnimit modeli arrin të përfaqësojë nivelin mesatar të eksportit dhe duket qe periudha e testimit parashikimet devijojnë ndjeshëm nga vlerat reale,shohim gjithashtu se mbetjet kane autokorrelacion
+
+## Sheshimi eksponencial i dyfishte
+
+```{r}
+fit_holt <- holt(ts_train, h = h_test)
+fit_holt
+```
+
+```{r}
+# --- Vizualizimi për modelin Holt (Eksporti)
+autoplot(ts_train, series = "Trajnimi", color = "black") +
+  autolayer(fitted(fit_holt),
+            series = "Përshtatja (Holt)",
+            color = "navy") +
+  autolayer(ts_test,
+            series = "Vlerat reale (Test)",
+            color = "gold") +
+  autolayer(fit_holt$mean,
+            series = "Parashikimi (Holt)",
+            color = "darkred") +
+  labs(
+    title = "Modeli Holt – Përshtatja dhe Parashikimi i Eksportit",
+    subtitle = "Krahasimi me të dhënat reale",
+    x = "Koha",
+    y = "Eksporti"
+  ) +
+  guides(colour = guide_legend(title = "Seria")) +
+  theme_minimal(base_size = 14)
+
+
+# Saktësia për modelin Holt
+acc_holt <- accuracy(fit_holt, ts_test)
+acc_holt
+
+# Kontrolli i mbetjeve të modelit Holt
+checkresiduals(fit_holt)
+```
+Modeli Holt arrin të kapë trendin rritës afatgjatë të serisë së eksportit. Gjatë periudhës së trajnimit, parashikimet ndjekin drejtimin e përgjithshëm të të dhënave, por nuk reflektojnë luhatjet sezonale të serisë. Në fazën e testimit, parashikimet devijojnë nga vlerat reale në periudhat me ndryshime të forta tremujore.
+
+## Sheshimi eksponencial i trefishte(additiv)
+
+```{r}
+# Modeli Holt–Winters me sezonalitet ADDITIV
+fit_hw_add <- hw(ts_train, h = h_test, seasonal = "additive")
+fit_hw_add
+```
+```{r}
+# Grafik: Trajnimi, Përshtatja, Testi, Parashikimi
+autoplot(ts_train, series = "Trajnimi", color = "brown") +
+  autolayer(fitted(fit_hw_add),
+            series = "Përshtatja (HW Additiv)",
+            color = "lightblue") +
+  autolayer(ts_test,
+            series = "Vlerat reale (Test)",
+            color = "lightgreen") +
+  autolayer(fit_hw_add$mean,
+            series = "Parashikimi (HW Additiv)",
+            color = "red") +
+  labs(
+    title = "Holt–Winters (Additiv) – Përshtatja dhe Parashikimi i Eksportit",
+    subtitle = "Model me trend dhe sezonalitet",
+    x = "Koha",
+    y = "Eksporti"
+  ) +
+  guides(colour = guide_legend(title = "Seria")) +
+  theme_minimal(base_size = 14)
+
+
+# Saktësia dhe diagnostika (Additiv)
+acc_hw_add <- accuracy(fit_hw_add, ts_test)
+acc_hw_add
+
+
+checkresiduals(fit_hw_add)
+```
+
+Modeli Holt–Winters additiv arrin të kapë njëkohësisht trendin rritës dhe sezonalitetin tremujor,mund te shohim nga grafiku se pershtatja gjate trajnimit eshte e mire dhe në fazën e testimit, modeli ruan aftësinë parashikuese dhe arrin të afrojë vlerat reale më mirë se modelet më të thjeshta.Edhe RMSE, MAE, MAPE jane me te vogla duke treguar nje performance me te mire parashikimi por shikojme se ende kem autokorrelacion.
+
+
+## Sheshimi eksponencial i trefishte(multiplikativ)
+
+```{r}
+fit_hw_mul <- hw(ts_train, h = h_test, seasonal = "multiplicative")
+
+
+autoplot(ts_train, series = "Train", color = "black") +
+  autolayer(fitted(fit_hw_mul), series = "Përshtatja (Fitted)", color = "orange") +
+  autolayer(ts_test, series = "Reale (Test)", color = "yellow") +
+  autolayer(fit_hw_mul$mean, series = "Parashikimi (HW Multiplikativ)", color = "purple") +
+  labs(title = "Holt–Winters (Multiplikativ) –  Përshtatja dhe Parashikimi i Eksportit",
+       x = "Koha",
+       y = "Eksporti") +
+  guides(colour = guide_legend(title = "Seria")) +
+  theme_minimal()
+
+
+# Saktësia dhe diagnostika (Multiplikativ)
+acc_hw_mul <- accuracy(fit_hw_mul, ts_test)
+acc_hw_mul
+
+#mbetja
+checkresiduals(fit_hw_mul)
+```
+Gjatë fazës së trajnimit,shihet se  modeli përshtatet mirë me strukturën periodike të të dhënave dhe ndjek më saktë kulmet dhe minimumet krahasuar me variantin additiv. Në periudhën e testimit, parashikimet janë më afër vlerave reale, veçanërisht në fazat me nivel më të lartë të serisë.
+
+## Modeli Ets
+
+```{r}
+# Modeli ETS (zgjedhje automatike)
+fit_ets <- ets(ts_train)
+fc_ets  <- forecast(fit_ets, h = h_test)
+
+# Grafik i parashikimit
+autoplot(fc_ets) +
+  ggtitle("Modeli ETS – Parashikimi i Eksportit 3-Mujor") +
+  xlab("Koha") +
+  ylab("Eksporti") +
+  theme_minimal()
+
+# Tabela e saktësisë
+acc_ets <- accuracy(fc_ets, ts_test)
+acc_ets
+```
+
+## Krahasimi i saktësisë së modeleve
+
+```{r}
+library(tibble)
+acc_table <- bind_rows(
+  data.frame(Model = "SES",            accuracy(fit_ses, ts_test)),
+  data.frame(Model = "Holt",           accuracy(fit_holt, ts_test)),
+  data.frame(Model = "HW Additive",    accuracy(fit_hw_add, ts_test)),
+  data.frame(Model = "HW Multiplicative", accuracy(fit_hw_mul, ts_test)),
+   data.frame(Model = "ETS",            accuracy(fc_ets, ts_test))
+)
+
+# Zgjedhim kolonat më përfaqësuese dhe renditim sipas RMSE
+acc_table <- acc_table %>%
+  select(Model, RMSE, MAE, MAPE, MASE) %>%
+  arrange(RMSE)
+
+knitr::kable(acc_table, caption = "Krahasimi i performancës së modeleve të parashikimit për serinë e eksportit ")
+```
+
+## Modeli dhe parashikimi 2 vjecar
+
+
+```{r}
+best_model <- acc_table$Model[1]
+best_model
+
+final_fit <- switch(
+  best_model,
+  "SES" = ses(ts_eksporti, h = 8),
+  "Holt" = holt(ts_eksporti, h = 8, damped = FALSE),
+  "HW Additive" = hw(ts_eksporti, h = 8, seasonal = "additive"),
+  "HW Multiplicative" = hw(ts_eksporti, h = 8, seasonal = "multiplicative"),
+  "ETS" = forecast(ets(ts_eksporti), h = 8)
+)
+
+autoplot(final_fit) +
+  ggtitle(paste0("Parashikimi 2-vjeçar (8 tremujorë) i Eksportit – Modeli: ", best_model)) +
+  xlab("Koha") +
+  ylab("Eksporti") +
+  theme_minimal(base_size = 14)
+```
+
+## Rezultatet e parashikimit 
+
+```{r}
+library(tibble)
+
+# Koha e parashikimit (vlerat ts)
+t <- time(final_fit$mean)
+
+Viti <- floor(t)
+Tremujori <- round((t - Viti) * 4 + 1)
+
+Periudha <- paste0(Viti, "-Q", Tremujori)
+
+final_fc_tbl <- tibble(
+  Periudha  = Periudha,
+  Parashikim = as.numeric(final_fit$mean),
+  Lwr95     = as.numeric(final_fit$lower[, "95%"]),
+  Upr95     = as.numeric(final_fit$upper[, "95%"])
+)
+
+knitr::kable(
+  final_fc_tbl,
+  caption = "Parashikimi 2-vjeçar (8 tremujorë) i Eksportit me intervalet e besimit 95%"
+)
+
+```
+---
+
+# Perfundime
+
+Analiza tregoi se seria e eksportit 3-mujor të energjisë elektrike karakterizohet nga një trend rritës dhe një sezonalitet i fortë tremujor.Krahasimi i performancës së modeleve në periudhën e testimit, bazuar në RMSE, MAE, MAPE dhe MASE, lejon identifikimin e modelit më të përshtatshëm për parashikim.  Në përfundim, modelet që përfshijnë njëkohësisht trendin dhe sezonalitetin (Holt–Winters dhe ETS) konsiderohen më të përshtatshmet për parashikimin e eksportit 3-mujor të energjisë elektrike.Parashikimet sugjerojnë se kapacitetet ekzistuese të prodhimit dhe kushtet klimatike do të vazhdojnë të ndikojnë ndjeshëm në volumin e eksportit.Në të ardhmen, investimet në burime të rinovueshme dhe përmirësimi i infrastrukturës së transmetimit mund të kontribuojnë në rritjen e potencialit eksportues dhe në stabilizimin e flukseve energjetike. Gjithashtu, integrimi më i fortë në tregjet rajonale të energjisë mund të krijojë mundësi të reja për optimizimin e eksportit.
